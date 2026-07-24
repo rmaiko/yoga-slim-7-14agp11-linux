@@ -7,8 +7,13 @@ Point, RDNA 3.5, ISA `gfx1153`) and a **2.8K 120 Hz OLED** panel.
 
 > ⚠️ **Not the 14ILL10.** `14AGP11` (`AGP` = AMD) is a *different machine* from the
 > Intel Lunar Lake `Yoga Slim 7 14ILL10`. If you have the AMD one, you're in the
-> right place. Search terms that land here: **Yoga Slim 7 14AGP11**, **83QS**,
-> **Radeon 840M**, **Krackan Point**, **amdgpu freeze**.
+> right place.
+>
+> <sub>**Landed here from a search?** This page also covers: Yoga Slim 7 14AGP11 /
+> 83QS / Gen 9 AMD, Ryzen AI 7 445, Radeon 840M, Krackan Point (Krackan2),
+> RDNA 3.5 `gfx1153`, XDNA/`amdxdna` NPU, MediaTek MT7925 Wi-Fi 7, ALC287 audio,
+> and the classic symptom **"screen freezes but the mouse still moves" / amdgpu
+> display freeze / PSR / Panel Replay** on Ubuntu 26.04 + XFCE.</sub>
 
 This started as one person's "adventures" getting this very new (late-2025)
 hardware working on Linux, written up so the next person doesn't have to
