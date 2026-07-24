@@ -446,6 +446,8 @@ p "_Regenerate any time: \`./scripts/hardware-fingerprint.sh\`._"
 if [[ "$REDACT" -eq 0 ]]; then
     p "_Sharing this? Regenerate with \`-r\` first to strip serials/UUIDs/MACs._"
 fi
+p "_Want to help others find your machine? \`./scripts/upload-hw-probe.sh\` shares an"
+p "anonymized probe with linux-hardware.org (opt-in, review-before-upload)._"
 
 # ===========================================================================
 # Redact (if asked) and write to the destination.

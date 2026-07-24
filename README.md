@@ -156,6 +156,25 @@ in the reference doc.
 
 ---
 
+## Help others find this laptop (optional)
+
+The [Linux Hardware Database](https://linux-hardware.org) collects anonymized
+hardware probes, and its per-model pages rank well in search — so a probe for this
+machine helps the *next* person discover that the Yoga Slim 7 14AGP11 (83QS) runs
+Linux, and points them here. Contributing one is a small kindness to the community:
+
+```bash
+./scripts/upload-hw-probe.sh     # interactive & opt-in: install? review? upload?
+```
+
+It uses the standard **`hw-probe`** tool (offers to install it if missing),
+lets you **inspect the probe locally first**, and only uploads on an explicit
+*yes*. Per hw-probe's design, **no** hostname, IPs, MACs, UUIDs or serials are
+sent — only device/driver info and salted hash prefixes, over HTTPS. You get a
+public probe URL back; drop it in an issue or here so others can cross-check.
+
+---
+
 ## Repository layout
 
 ```
@@ -169,6 +188,7 @@ scripts/
   setup-screenshots.sh    Region-screenshot key bindings + clipboard manager
   setup-tty-font.sh       Large console font for the 2.8K panel (+ initramfs, readable early boot)
   hardware-fingerprint.sh Generate ~/aboutme.md — your machine's own hardware/driver reference
+  upload-hw-probe.sh      Opt-in: share an anonymized probe to linux-hardware.org (helps discoverability)
 ```
 
 ## Contributing
