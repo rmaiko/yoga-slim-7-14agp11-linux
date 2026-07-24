@@ -1,0 +1,493 @@
+#!/usr/bin/env bash
+#
+# hardware-fingerprint.sh — Generate a personal "~/aboutme.md" hardware fingerprint.
+#
+# Cloned this repo but you DON'T have the Lenovo Yoga Slim 7 14AGP11? This walks
+# your own machine the same way docs/hardware-reference.md was written by hand:
+# every component with its PCI/USB ID and the kernel module that binds it, plus
+# CPU/RAM/disk/display/battery/firmware — so years from now you can open one file
+# and debug "why won't my <device> load" without re-discovering the hardware.
+#
+# It only READS (lspci, lsusb, lscpu, dmidecode, xrandr, upower, …). Nothing is
+# changed on your system; the only thing written is the output Markdown file.
+#
+#   ./scripts/hardware-fingerprint.sh                 # -> ~/aboutme.md (full, personal)
+#   ./scripts/hardware-fingerprint.sh -r              # -> ~/aboutme.md (redacted, shareable)
+#   ./scripts/hardware-fingerprint.sh -o hw.md        # -> ./hw.md
+#   ./scripts/hardware-fingerprint.sh --stdout        # print to stdout
+#
+# Serials/UUIDs need root: run with sudo (or let it use passwordless sudo if set
+# up) to capture them. Without root it degrades gracefully and notes what it skipped.
+#
+# Privacy: this repo's rule is "don't paste raw serials, UUIDs, machine-id or MACs"
+# into issues. The DEFAULT file is your private copy (kept in $HOME) WITH those
+# values, because it's yours. Pass -r/--redact to produce a scrubbed copy that is
+# safe to attach to a bug report or PR — serials, UUIDs, machine-id and MAC
+# addresses are replaced with REDACTED… / xx:xx placeholders, exactly like the
+# committed reference doc.
+#
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Args
+# ---------------------------------------------------------------------------
+OUT=""
+REDACT=0
+TO_STDOUT=0
+
+usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o|--output)  OUT="${2:-}"; shift 2 ;;
+        -r|--redact)  REDACT=1; shift ;;
+        --stdout)     TO_STDOUT=1; shift ;;
+        -h|--help)    usage 0 ;;
+        *) echo "Unknown option: $1" >&2; usage 1 ;;
+    esac
+done
+
+# Default output path. When run under sudo, write to the *invoking* user's $HOME.
+if [[ -z "$OUT" ]]; then
+    if [[ ${EUID:-$(id -u)} -eq 0 && -n "${SUDO_USER:-}" ]]; then
+        HOME_DIR="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+    else
+        HOME_DIR="$HOME"
+    fi
+    OUT="$HOME_DIR/aboutme.md"
+fi
+
+# ---------------------------------------------------------------------------
+# Privileged reads: use root if we have it, else opportunistic passwordless sudo.
+# ---------------------------------------------------------------------------
+SUDO=""
+HAVE_ROOT=0
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    HAVE_ROOT=1
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    SUDO="sudo -n"; HAVE_ROOT=1
+fi
+
+# ---------------------------------------------------------------------------
+# Write to a temp file, then (optionally redact and) move into place.
+# ---------------------------------------------------------------------------
+TMP="$(mktemp "${TMPDIR:-/tmp}/aboutme.XXXXXX.md")"
+trap 'rm -f "$TMP"' EXIT
+
+have() { command -v "$1" >/dev/null 2>&1; }
+p()    { printf '%s\n' "$*" >>"$TMP"; }      # print a raw line
+nl()   { printf '\n'      >>"$TMP"; }        # blank line
+
+# Secrets to scrub in --redact mode. We collect the literal values we read and
+# replace exactly those, which avoids over-redacting unrelated text. A generic
+# MAC regex is applied on top to catch any we didn't capture explicitly.
+declare -a SECRETS=()
+secret() { [[ -n "${1:-}" ]] && SECRETS+=("$1"); return 0; }
+
+# Emit a fenced code block containing the output of a command (or a fallback note).
+# Usage: block <language> <command...>
+block() {
+    local lang="$1"; shift
+    local out
+    if out="$("$@" 2>/dev/null)" && [[ -n "$out" ]]; then
+        p '```'"$lang"; printf '%s\n' "$out" >>"$TMP"; p '```'
+    else
+        p "_(\`$*\` produced no output or the tool is not installed)_"
+    fi
+}
+
+# Same, but for a full shell pipeline passed as a single string.
+blocksh() {
+    local lang="$1"; shift
+    local out
+    if out="$(bash -c "$*" 2>/dev/null)" && [[ -n "$out" ]]; then
+        p '```'"$lang"; printf '%s\n' "$out" >>"$TMP"; p '```'
+    else
+        p "_(no output — a required tool may not be installed)_"
+    fi
+}
+
+# Read a single value, print a "| Field | Value |" style note, remember missing tools.
+val() { bash -c "$*" 2>/dev/null || true; }
+
+# ===========================================================================
+# Header
+# ===========================================================================
+NOW="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+HOSTNAME_VAL="$(val 'hostname 2>/dev/null || cat /proc/sys/kernel/hostname')"
+
+p "# Hardware & Driver Fingerprint — \`${HOSTNAME_VAL}\`"
+nl
+p "> Auto-generated by \`scripts/hardware-fingerprint.sh\` on **${NOW}**."
+if [[ "$REDACT" -eq 1 ]]; then
+    p "> **Redacted copy** — serials, UUIDs, machine-id and MAC addresses are"
+    p "> replaced with placeholders; safe to attach to an issue or PR."
+else
+    p "> **Personal copy** — contains real serials/UUIDs/MACs. Run with \`-r\` for a"
+    p "> shareable, redacted version before pasting this anywhere public."
+fi
+if [[ "$HAVE_ROOT" -eq 0 ]]; then
+    p ">"
+    p "> ⚠️ Run without root: serials, DMI UUID and per-module RAM details were"
+    p "> **skipped**. Re-run with \`sudo\` to include them."
+fi
+nl
+p "Every component below lists (where available) its **PCI/USB ID** and the"
+p "**kernel module** that drives it — that pairing is what you need to debug"
+p "\"my <device> won't load\". Inspired by \`docs/hardware-reference.md\` in this repo."
+nl
+p '---'
+nl
+
+# ===========================================================================
+# 1. Identity / chassis / firmware
+# ===========================================================================
+p "## 1. Identity, chassis & firmware"
+nl
+
+dmi() { cat "/sys/class/dmi/id/$1" 2>/dev/null || true; }
+VENDOR="$(dmi sys_vendor)"
+PRODUCT_NAME="$(dmi product_name)"
+PRODUCT_VER="$(dmi product_version)"
+BOARD_NAME="$(dmi board_name)"
+BOARD_VER="$(dmi board_version)"
+CHASSIS_TYPE="$(dmi chassis_type)"
+BIOS_VENDOR="$(dmi bios_vendor)"
+BIOS_VER="$(dmi bios_version)"
+BIOS_DATE="$(dmi bios_date)"
+
+# Serials / UUID / machine-id (need root for the DMI ones).
+SYS_SERIAL="$(dmi product_serial)"
+BOARD_SERIAL="$(dmi board_serial)"
+CHASSIS_SERIAL="$(dmi chassis_serial)"
+SYS_UUID="$(dmi product_uuid)"
+MACHINE_ID="$(cat /etc/machine-id 2>/dev/null || true)"
+secret "$SYS_SERIAL"; secret "$BOARD_SERIAL"; secret "$CHASSIS_SERIAL"
+secret "$SYS_UUID"; secret "$MACHINE_ID"
+
+p "| Field | Value |"
+p "|---|---|"
+p "| Vendor | ${VENDOR:-?} |"
+p "| Product name (DMI) | ${PRODUCT_NAME:-?} |"
+p "| Marketing version | ${PRODUCT_VER:-?} |"
+p "| Board | ${BOARD_NAME:-?} (version ${BOARD_VER:-?}) |"
+p "| Chassis type code | ${CHASSIS_TYPE:-?} |"
+p "| Hostname | \`${HOSTNAME_VAL}\` |"
+p "| Machine ID | \`${MACHINE_ID:-?}\` |"
+p "| BIOS | ${BIOS_VENDOR:-?} **${BIOS_VER:-?}** (${BIOS_DATE:-?}) |"
+p "| System serial | \`${SYS_SERIAL:-— (needs sudo)}\` |"
+p "| Board serial | \`${BOARD_SERIAL:-— (needs sudo)}\` |"
+p "| Chassis serial | \`${CHASSIS_SERIAL:-— (needs sudo)}\` |"
+p "| System UUID | \`${SYS_UUID:-— (needs sudo)}\` |"
+nl
+if have dmidecode && [[ "$HAVE_ROOT" -eq 1 ]]; then
+    p "<details><summary><code>dmidecode -t system -t baseboard -t chassis -t bios</code></summary>"
+    nl
+    block "" $SUDO dmidecode -t system -t baseboard -t chassis -t bios
+    nl
+    p "</details>"
+    nl
+fi
+
+# ===========================================================================
+# 2. Operating system
+# ===========================================================================
+p "## 2. Operating system"
+nl
+OS_PRETTY="$(val '. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"')"
+KERNEL="$(uname -r)"
+ARCH="$(uname -m)"
+SESSION_TYPE="${XDG_SESSION_TYPE:-?}"
+DESKTOP="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-?}}"
+p "| Field | Value |"
+p "|---|---|"
+p "| Distro | ${OS_PRETTY:-?} |"
+p "| Kernel | **${KERNEL}** (${ARCH}) |"
+p "| Desktop / session | ${DESKTOP} / ${SESSION_TYPE} |"
+p "| Kernel cmdline | \`$(cat /proc/cmdline 2>/dev/null)\` |"
+nl
+
+# ===========================================================================
+# 3. CPU
+# ===========================================================================
+p "## 3. CPU"
+nl
+if have lscpu; then
+    MODEL="$(val "lscpu | sed -n 's/^Model name: *//p'")"
+    CORES="$(val "lscpu | sed -n 's/^Core(s) per socket: *//p'")"
+    THREADS="$(val "lscpu | sed -n 's/^CPU(s): *//p'")"
+    p "| Field | Value |"
+    p "|---|---|"
+    p "| Model | **${MODEL:-?}** |"
+    p "| CPU(s) / threads | ${THREADS:-?} |"
+    p "| Cores per socket | ${CORES:-?} |"
+    nl
+    p "<details><summary><code>lscpu</code></summary>"
+    nl
+    block "" lscpu
+    nl
+    p "</details>"
+else
+    blocksh "" "cat /proc/cpuinfo | grep -m1 'model name'"
+fi
+nl
+
+# ===========================================================================
+# 4. Memory
+# ===========================================================================
+p "## 4. Memory"
+nl
+block "" free -h
+nl
+if have dmidecode && [[ "$HAVE_ROOT" -eq 1 ]]; then
+    p "<details><summary><code>dmidecode -t memory</code> (module/slot detail)</summary>"
+    nl
+    block "" $SUDO dmidecode -t memory
+    nl
+    p "</details>"
+    nl
+else
+    p "_(per-module RAM detail needs \`sudo dmidecode -t memory\`)_"
+    nl
+fi
+
+# ===========================================================================
+# 5. Storage
+# ===========================================================================
+p "## 5. Storage"
+nl
+block "" lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL
+nl
+# Capture NVMe serials so we can redact them.
+if have nvme && [[ "$HAVE_ROOT" -eq 1 ]]; then
+    while read -r sn; do secret "$sn"; done < <(val "$SUDO nvme list 2>/dev/null | awk 'NR>2{print \$2}'")
+    p "<details><summary><code>nvme list</code></summary>"
+    nl
+    block "" $SUDO nvme list
+    nl
+    p "</details>"
+    nl
+fi
+
+# ===========================================================================
+# 6. Graphics / display
+# ===========================================================================
+p "## 6. Graphics & display"
+nl
+if have lspci; then
+    p "**GPU(s):**"
+    nl
+    blocksh "" "lspci -nnk | grep -iA3 -E 'vga|3d|display'"
+    nl
+fi
+# Connected outputs / refresh rates.
+if have xrandr && [[ -n "${DISPLAY:-}" ]]; then
+    p "**Connected outputs (xrandr):**"
+    nl
+    blocksh "" "xrandr 2>/dev/null | grep -E ' connected|\\*'"
+    nl
+elif have xrandr; then
+    p "_(\`xrandr\` needs a running X session; \\\$DISPLAY is unset)_"
+    nl
+fi
+# Panel model + type from DRM/EDID, no external tools required.
+for drm in /sys/class/drm/card*-eDP-*; do
+    [[ -e "$drm/edid" ]] || continue
+    conn="$(basename "$drm")"
+    # Bytes 8-9 of the EDID manufacturer block spell the vendor; the 13-char model
+    # name lives in a descriptor. edid-decode is nicer if present.
+    if have edid-decode; then
+        panel="$(edid-decode "$drm/edid" 2>/dev/null | sed -n 's/^ *Display Product Name: *//p' | head -1)"
+        mfg="$(edid-decode "$drm/edid" 2>/dev/null | sed -n 's/^ *Manufacturer: *//p' | head -1)"
+        p "**Internal panel (${conn}):** ${mfg:-?} ${panel:-?}"
+    else
+        p "**Internal panel (${conn}):** EDID present at \`${drm}/edid\` (install \`edid-decode\` to name it)"
+    fi
+    nl
+done
+
+# ===========================================================================
+# 7. Networking (Wi-Fi + Bluetooth + wired)
+# ===========================================================================
+p "## 7. Networking"
+nl
+if have lspci; then
+    p "**Network controllers (PCI):**"
+    nl
+    blocksh "" "lspci -nnk | grep -iA3 -E 'network|ethernet'"
+    nl
+fi
+p "**Interfaces / MACs:**"
+nl
+if have ip; then
+    # MACs are redacted by the generic regex pass, not captured as literals.
+    blocksh "" "ip -brief link 2>/dev/null || ip link"
+    nl
+fi
+if have rfkill; then
+    p "**rfkill (radio soft/hard-block state):**"
+    nl
+    block "" rfkill list
+    nl
+fi
+if have bluetoothctl || val "lsusb | grep -iq bluetooth"; then
+    p "**Bluetooth:**"
+    nl
+    blocksh "" "lsusb | grep -iE 'bluetooth' || true; hciconfig -a 2>/dev/null | grep -E 'hci|BD Address' || true"
+    nl
+fi
+
+# ===========================================================================
+# 8. Audio
+# ===========================================================================
+p "## 8. Audio"
+nl
+if have aplay; then
+    block "" aplay -l
+    nl
+fi
+if have lspci; then
+    blocksh "" "lspci -nnk | grep -iA3 -E 'audio'"
+    nl
+fi
+
+# ===========================================================================
+# 9. Cameras / video capture
+# ===========================================================================
+p "## 9. Cameras & video capture"
+nl
+if have v4l2-ctl; then
+    block "" v4l2-ctl --list-devices
+    nl
+elif compgen -G "/dev/video*" >/dev/null; then
+    blocksh "" "ls -1 /dev/video* 2>/dev/null"
+    p "_(install \`v4l-utils\` for names/formats: \`v4l2-ctl --list-devices\`)_"
+    nl
+fi
+if have lsusb; then
+    blocksh "" "lsusb | grep -iE 'cam|webcam|video|imaging' || true"
+    nl
+fi
+
+# ===========================================================================
+# 10. Input devices
+# ===========================================================================
+p "## 10. Input devices"
+nl
+blocksh "" "grep -E '^N: Name=' /proc/bus/input/devices 2>/dev/null | sed 's/^N: Name=//'"
+nl
+if have libinput && [[ "$HAVE_ROOT" -eq 1 ]]; then
+    p "<details><summary><code>libinput list-devices</code></summary>"
+    nl
+    block "" $SUDO libinput list-devices
+    nl
+    p "</details>"
+    nl
+fi
+
+# ===========================================================================
+# 11. Battery / power
+# ===========================================================================
+p "## 11. Battery & power"
+nl
+if have upower; then
+    BAT="$(val "upower -e 2>/dev/null | grep -m1 BAT")"
+    if [[ -n "$BAT" ]]; then
+        # Battery serials are per-unit; capture for redaction.
+        while read -r bs; do secret "$bs"; done < <(val "upower -i '$BAT' 2>/dev/null | sed -n 's/.*serial: *//p'")
+        block "" upower -i "$BAT"
+        nl
+    else
+        p "_(no battery reported — desktop, or upower found none)_"
+        nl
+    fi
+else
+    for b in /sys/class/power_supply/BAT*; do
+        [[ -d "$b" ]] || continue
+        blocksh "" "echo BATTERY $(basename $b); cat $b/manufacturer $b/model_name 2>/dev/null; echo capacity: $(cat $b/capacity 2>/dev/null)%"
+        nl
+    done
+fi
+
+# ===========================================================================
+# 12. Full device inventory + the driver→component map
+# ===========================================================================
+p "## 12. Full device inventory"
+nl
+p "The \"why won't X load\" table: every PCI device with its ID and bound kernel"
+p "module. First debug step for any device is almost always \`dmesg | grep <module>\`."
+nl
+if have lspci; then
+    p "<details open><summary><code>lspci -nnk</code> — PCI devices + kernel drivers</summary>"
+    nl
+    block "" lspci -nnk
+    nl
+    p "</details>"
+    nl
+fi
+if have lsusb; then
+    p "<details><summary><code>lsusb</code> — USB devices</summary>"
+    nl
+    block "" lsusb
+    nl
+    p "</details>"
+    nl
+    p "<details><summary><code>lsusb -t</code> — USB topology</summary>"
+    nl
+    block "" lsusb -t
+    nl
+    p "</details>"
+    nl
+fi
+
+nl
+p '---'
+p "_Regenerate any time: \`./scripts/hardware-fingerprint.sh\`._"
+if [[ "$REDACT" -eq 0 ]]; then
+    p "_Sharing this? Regenerate with \`-r\` first to strip serials/UUIDs/MACs._"
+fi
+
+# ===========================================================================
+# Redact (if asked) and write to the destination.
+# ===========================================================================
+if [[ "$REDACT" -eq 1 ]]; then
+    # Replace each captured secret literal, longest-first so substrings don't
+    # partially match. sed with a safe delimiter; escape regex metacharacters.
+    if [[ ${#SECRETS[@]} -gt 0 ]]; then
+        # De-dup + sort by length descending so longer values match before any
+        # value that is a substring of another.
+        mapfile -t UNIQ < <(printf '%s\n' "${SECRETS[@]}" | awk '!seen[$0]++' | awk '{ print length, $0 }' | sort -rn | cut -d' ' -f2-)
+        for s in "${UNIQ[@]}"; do
+            # Skip very short values — replacing them globally risks clobbering
+            # unrelated numbers. Word boundaries below guard the rest.
+            [[ ${#s} -lt 3 ]] && continue
+            esc="$(printf '%s' "$s" | sed -e 's/[][\\/.*^$]/\\&/g')"
+            sed -i "s/\\b$esc\\b/REDACTED/g" "$TMP"
+        done
+    fi
+    # Catch UUID- and MAC-shaped strings (e.g. the rootfs UUID in the kernel
+    # cmdline, or a MAC we didn't capture explicitly).
+    sed -i -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/REDACTED-UUID/g' "$TMP"
+    sed -i -E 's/([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}/xx:xx:xx:xx:xx:xx/g' "$TMP"
+fi
+
+if [[ "$TO_STDOUT" -eq 1 ]]; then
+    cat "$TMP"
+    exit 0
+fi
+
+# Don't clobber an existing file silently — back it up.
+if [[ -e "$OUT" ]]; then
+    cp -a "$OUT" "${OUT}.bak.$(date +%Y%m%d-%H%M%S)"
+    echo ">> Backed up existing $OUT"
+fi
+cp "$TMP" "$OUT"
+# If we ran under sudo, hand the file back to the invoking user.
+if [[ ${EUID:-$(id -u)} -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    chown "$SUDO_USER:$(id -gn "$SUDO_USER")" "$OUT" 2>/dev/null || true
+fi
+
+echo ">> Wrote $OUT"
+[[ "$REDACT" -eq 1 ]] && echo ">> Redacted: serials / UUIDs / machine-id / MACs replaced."
+[[ "$HAVE_ROOT" -eq 0 ]] && echo ">> Note: run with sudo to include serials & DMI UUID."
+echo ">> Preview:  less \"$OUT\""

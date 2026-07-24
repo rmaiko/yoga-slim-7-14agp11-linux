@@ -112,6 +112,32 @@ See [`scripts/brightness-step.sh`](scripts/brightness-step.sh) (tunable `N` step
 
 ---
 
+## Get your own hardware fingerprint (`~/aboutme.md`)
+
+Cloned this repo but **don't** have this exact laptop? Generate the same kind of
+component-by-component reference for *your* machine — every device with its
+PCI/USB ID and the kernel module that drives it, plus CPU/RAM/disk/display/
+battery/firmware:
+
+```bash
+./scripts/hardware-fingerprint.sh            # writes ~/aboutme.md (your private copy)
+sudo ./scripts/hardware-fingerprint.sh       # also includes serials & DMI UUID
+./scripts/hardware-fingerprint.sh -r         # redacted copy, safe to attach to an issue/PR
+./scripts/hardware-fingerprint.sh --stdout   # print instead of writing a file
+```
+
+It **only reads** (`lspci`, `lsusb`, `lscpu`, `dmidecode`, `xrandr`, `upower`, …) —
+nothing on your system is changed; the sole output is the Markdown file. This is
+the automated version of the [regenerate one-liners](docs/hardware-reference.md#3-handy-one-liners-to-regenerate-this-info-later)
+in the reference doc.
+
+> **Privacy:** the default `~/aboutme.md` is *your* copy and includes real
+> serials/UUIDs/MACs. Per this repo's contributing rule, run with **`-r`** before
+> pasting it anywhere public — that scrubs serials, the DMI UUID, machine-id and
+> MAC addresses to `REDACTED…` / `xx:xx` placeholders, just like the reference doc.
+
+---
+
 ## Repository layout
 
 ```
@@ -123,6 +149,7 @@ scripts/
   brightness-step.sh      Perceptual backlight stepper (logind, no root)
   setup-brightness-keys.sh  Installs the stepper and rebinds the brightness keys
   setup-screenshots.sh    Region-screenshot key bindings + clipboard manager
+  hardware-fingerprint.sh Generate ~/aboutme.md — your machine's own hardware/driver reference
 ```
 
 ## Contributing
