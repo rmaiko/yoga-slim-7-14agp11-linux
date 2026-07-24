@@ -110,6 +110,24 @@ See [`scripts/brightness-step.sh`](scripts/brightness-step.sh) (tunable `N` step
 > when the tool exits unless a clipboard manager holds it, so the script makes sure
 > **`xfce4-clipman`** is running.
 
+### Readable text consoles (Ctrl+Alt+F3) on the 2.8K panel
+
+At 2880×1800 the default console font is microscopic — the recovery/login TTYs
+and early-boot kernel messages are unreadable. This sets a large **DejaVu**
+console font *and bakes it into the initramfs* so it applies from early boot, not
+just once the desktop is up:
+
+```bash
+sudo ./scripts/setup-tty-font.sh            # DejaVu 24x43 (good default here)
+sudo ./scripts/setup-tty-font.sh 32x59      # bigger
+./scripts/setup-tty-font.sh --list          # available sizes
+```
+
+> The easy-to-miss part: setting `FONTFACE`/`FONTSIZE` in
+> `/etc/default/console-setup` alone isn't enough — without
+> **`update-initramfs -u`** the font only kicks in late, so boot messages stay
+> tiny. The script runs both `setupcon` and `update-initramfs -u` for you.
+
 ---
 
 ## Get your own hardware fingerprint (`~/aboutme.md`)
@@ -149,6 +167,7 @@ scripts/
   brightness-step.sh      Perceptual backlight stepper (logind, no root)
   setup-brightness-keys.sh  Installs the stepper and rebinds the brightness keys
   setup-screenshots.sh    Region-screenshot key bindings + clipboard manager
+  setup-tty-font.sh       Large console font for the 2.8K panel (+ initramfs, readable early boot)
   hardware-fingerprint.sh Generate ~/aboutme.md — your machine's own hardware/driver reference
 ```
 

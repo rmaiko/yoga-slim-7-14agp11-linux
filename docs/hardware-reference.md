@@ -442,3 +442,47 @@ xfconf-query -c xfce4-keyboard-shortcuts -p /commands/custom/Print -n -t string 
 ```
 
 *§6 (screenshots) added & verified 2026-07-24 on kernel 7.0.0-14-generic.*
+
+---
+
+## 7. Readable text consoles on the 2.8K panel *(ACTIVE, added 2026-07-24)*
+
+**Problem:** the internal panel is **2880 × 1800** (§1.9). The virtual consoles
+(`Ctrl+Alt+F3`…`F6`) and the early-boot kernel/initramfs messages render with the
+default **~8×16** console font, which at this pixel density is **microscopic** —
+roughly 360 columns of unreadable text. This bites exactly when you need a TTY:
+recovery, or capturing a live freeze (§2).
+
+**Fix:** a large **DejaVu** console font, set in `/etc/default/console-setup` and
+applied with `setupcon`. The non-obvious half: also **`update-initramfs -u`**, so
+the font is present in the initramfs and applies from *early* boot — otherwise the
+boot messages stay tiny until the desktop's `console-setup` service runs late.
+
+- **Config (`/etc/default/console-setup`):**
+  ```
+  FONTFACE="DejaVu"
+  FONTSIZE="24x43"      # WIDTHxHEIGHT; ≈ 120 cols × 41 rows at 2880×1800
+  ```
+  Note the ordering quirk: `FONTSIZE` is **WIDTHxHEIGHT**, but the font *files*
+  are named `…-DejaVu<HEIGHT>x<WIDTH>.psf.gz` (so `24x43` ↔ `DejaVu43x24`).
+  Available DejaVu sizes: `16x30, 20x36, 24x43, 28x51, 32x59, 40x74, 48x89,
+  64x118` — go bigger (e.g. `32x59`) if 24x43 still feels small.
+- **Applier script:** `scripts/setup-tty-font.sh` (validates the size against
+  installed fonts, backs up the config, runs `setupcon` **and**
+  `update-initramfs -u`). `--list` shows sizes, `--show` prints the current config.
+- **Apply by hand:**
+  ```bash
+  sudo sed -i 's/^FONTFACE=.*/FONTFACE="DejaVu"/;  s/^FONTSIZE=.*/FONTSIZE="24x43"/' /etc/default/console-setup
+  sudo setupcon --force
+  sudo update-initramfs -u
+  ```
+- **Verify:** switch to a console with `Ctrl+Alt+F3` (text should be large);
+  `setfont --help` / `showconsolefont` show the loaded glyphs. Return to the
+  desktop with `Ctrl+Alt+F2` (or F1).
+- **Revert:** restore the `console-setup.bak.*` backup, then re-run `setupcon` and
+  `update-initramfs -u`.
+
+> Why **DejaVu** and not Terminus: Terminus caps at 16×32 px here, whereas DejaVu
+> scales up to 64×118 — the headroom you want on a 2.8K panel.
+
+*§7 (console font) added 2026-07-24 on kernel 7.0.0-14-generic.*
