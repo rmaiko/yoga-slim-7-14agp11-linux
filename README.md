@@ -36,6 +36,7 @@ important fix and a couple of quality-of-life tweaks:
 | Webcam **+ IR** | ✅ | RGB on `/dev/video0`, **IR on `/dev/video2`** — face unlock via Howdy is viable |
 | NPU (XDNA) | ✅ | `/dev/accel/accel0` via `amdxdna` |
 | Touchpad / hotkeys | ✅ | Synaptics I²C-HID, `ideapad_laptop` |
+| Battery / charging | ✅ tweak | Charges at **~44 W into a 70 Wh cell** (PD-bound, not adjustable in software). `charge_types` can cap it at ~60% — see [battery care](#battery-care-stop-charging-at-60--panel-indicator) |
 | Fingerprint | ❌ | **No fingerprint hardware exists on this unit** (audited) — don't hunt for a driver |
 | Suspend, USB4/TB, NVMe | ✅ | stock |
 
@@ -133,6 +134,67 @@ sudo ./scripts/setup-tty-font.sh 32x59      # bigger
 > **`update-initramfs -u`** the font only kicks in late, so boot messages stay
 > tiny. The script runs both `setupcon` and `update-initramfs -u` for you.
 
+### Battery care: stop charging at ~60% (+ panel indicator)
+
+Out of the box this machine charges with Lenovo **Rapid Charge** on, pushing
+**~44 W into a 70 Wh cell** — about **0.63C**. `ideapad_laptop` exposes Lenovo's
+entire battery-care feature set as **one** sysfs knob:
+
+```
+/sys/class/power_supply/BAT1/charge_types  ->  [Fast] Standard Long_Life
+```
+
+| Mode | Charges to | Measured rate @ 25–28% | Use it when |
+|---|---|---|---|
+| `Fast` | 100% | 44.4 W | You need a full battery *now*. Stock default. |
+| `Standard` | 100% | 44.2 W | Rapid Charge off — but see below: no measurable difference on this unit. |
+| `Long_Life` | **~55–60%** | 43.9 W, until the cap | The laptop mostly lives on AC. **The one that actually helps.** |
+
+> ⚠️ **Measured, not assumed — this knob does *not* throttle the charge rate.**
+> All three modes charge at the same ~44 W. The rate is set by the **USB-PD
+> contract**, not by the EC's charge mode: `ucsi-source-psy-USBC000:002` reports
+> `current_now=3000000` (3 A ≈ **60 W** negotiated), the system draws ~15 W, and
+> the battery gets the remaining ~44 W.
+>
+> **So there is no software rate limiter.** If you want a gentler charge *rate*,
+> use a **lower-wattage PD charger** — a 30 W or 45 W brick caps the total, and
+> the battery takes what is left after system draw. That is a hardware lever, not
+> a software one.
+>
+> Observed directly: when the PD contract renegotiated from **3 A** down to
+> **1.5 A** (`current_now=1500000`, ~30 W), the charge rate fell from ~44 W to
+> **~20 W** with the charge mode untouched. The contract sets the rate.
+>
+> The real longevity lever in software is `Long_Life`: not slower charging, but
+> never parking the cell at 100%. High state-of-charge is what drives calendar
+> aging.
+>
+> <sub>Caveat: those figures were all sampled at 25–28% SoC. `Fast` and
+> `Standard` may still diverge higher up the curve, where Rapid Charge could hold
+> constant-current longer or terminate at a higher voltage — untested.</sub>
+
+```bash
+sudo ./scripts/setup-battery-care.sh              # install + select Standard
+sudo ./scripts/setup-battery-care.sh conservation # install + select Long_Life
+battery-care status                               # mode, live rate, health, cycles
+battery-care watch                                # live charge rate, 1 Hz
+battery-care fast | standard | conservation       # switch, no sudo after setup
+```
+
+The setup installs a **notification-area indicator** ([`scripts/battery-care-indicator.py`](scripts/battery-care-indicator.py))
+showing the current mode and the live charge rate, with a menu to switch between
+the three — plus a udev rule that grants your group write access to the knob (so
+switching needs no root and no password prompt) and **re-applies your choice at
+boot and after an AC plug/unplug**, which the EC otherwise forgets.
+
+> **Don't also use TLP for this.** `Long_Life` *is* conservation mode — the
+> kernel driver says so outright: *"conservation_mode attribute has been
+> deprecated, see charge_types"*. TLP's lenovo plugin still writes that old
+> `conservation_mode` file, so if you set `STOP_CHARGE_THRESH_BAT0` in
+> `tlp.conf` the two will fight on every AC transition. The setup script warns
+> you if it finds such a setting. Note also that TLP's lenovo plugin treats that
+> value as a **boolean** (0/1), not a percentage.
+
 ---
 
 ## Get your own hardware fingerprint (`~/aboutme.md`)
@@ -192,6 +254,9 @@ scripts/
   setup-brightness-keys.sh  Installs the stepper and rebinds the brightness keys
   setup-screenshots.sh    Region-screenshot key bindings + clipboard manager
   setup-tty-font.sh       Large console font for the 2.8K panel (+ initramfs, readable early boot)
+  setup-battery-care.sh   Installs charge-mode control: CLI + udev rule + panel indicator
+  battery-care.sh         Read/set the EC charge mode (Fast / Standard / Long_Life, ~60% cap)
+  battery-care-indicator.py  Notification-area indicator: current mode, live charge rate, switcher
   hardware-fingerprint.sh Generate ~/aboutme.md — your machine's own hardware/driver reference
   upload-hw-probe.sh      Opt-in: share an anonymized probe to linux-hardware.org (helps discoverability)
 ```
