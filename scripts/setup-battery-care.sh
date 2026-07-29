@@ -174,7 +174,7 @@ Type=Application
 Name=Battery Care Indicator
 Comment=Charge mode (Fast / Standard / Long Life) in the notification area
 Exec=$INDICATOR
-Icon=battery-good-charging-symbolic
+Icon=power-profile-balanced-symbolic
 Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF

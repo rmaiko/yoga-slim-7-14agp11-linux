@@ -7,7 +7,7 @@ the menu:
 
     Fast        Rapid Charge, to 100% at ~44 W   (stock, hardest on the cell)
     Standard    to 100% at the normal rate
-    Long_Life   conservation, stops around 55-60%
+    Long_Life   conservation, stops around 80%
 
 All three are the one `charge_types` sysfs knob on the battery — see
 battery-care.sh for the full explanation. Switching needs write access to that
@@ -34,24 +34,31 @@ REFRESH_SECONDS = 4
 STATE_FILE = "/etc/battery-care/mode"
 
 # sysfs value -> (menu label, tooltip/description, icon candidates best-first)
+#
+# The icons are deliberately NOT batteries: this sits next to the normal battery
+# indicator, and a second battery there says nothing. The power-profile-* set
+# (speedometer / balance scale / leaf) reads as "which mode", which is the only
+# thing this icon has to say. They live in Adwaita; GTK falls back to it even
+# under other themes, but the battery names stay as a last resort for systems
+# where they don't resolve.
 MODES = {
     "Fast": (
         "Fast charge — to 100%",
         "Lenovo Rapid Charge. Charges to 100%. Stock default.",
-        ("battery-full-charging-symbolic", "battery-full-charged-symbolic"),
+        ("power-profile-performance-symbolic", "battery-full-charging-symbolic"),
     ),
     "Standard": (
         "Standard — to 100%",
         "Rapid Charge off. Charges to 100%. Measured no slower than Fast on "
         "this machine — the rate is set by the USB-PD contract, not this knob.",
-        ("battery-good-charging-symbolic", "battery-good-symbolic"),
+        ("power-profile-balanced-symbolic", "battery-good-symbolic"),
     ),
     "Long_Life": (
-        "Long Life — stop at ~60%",
-        "Conservation mode. Holds the charge around 55-60% — best when the "
+        "Long Life — stop at ~80%",
+        "Conservation mode. Holds the charge around 80% — best when the "
         "laptop mostly lives on AC, and the only one of the three that "
         "measurably helps battery life.",
-        ("battery-level-60-symbolic", "battery-low-symbolic"),
+        ("power-profile-power-saver-symbolic", "battery-level-80-symbolic"),
     ),
 }
 
@@ -158,9 +165,11 @@ class BatteryCareIndicator:
     def __init__(self):
         self.suppress = False  # guards programmatic radio updates
 
+        # Start on the current mode's icon — refresh() would fix it a moment
+        # later anyway, but not before the panel has shown the wrong one.
         self.indicator = AppIndicator.Indicator.new(
             "battery-care",
-            pick_icon(MODES["Fast"][2]),
+            pick_icon(MODES.get(current_mode(), MODES["Fast"])[2]),
             AppIndicator.IndicatorCategory.HARDWARE,
         )
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)

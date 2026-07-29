@@ -36,7 +36,7 @@ important fix and a couple of quality-of-life tweaks:
 | Webcam **+ IR** | ✅ | RGB on `/dev/video0`, **IR on `/dev/video2`** — face unlock via Howdy is viable |
 | NPU (XDNA) | ✅ | `/dev/accel/accel0` via `amdxdna` |
 | Touchpad / hotkeys | ✅ | Synaptics I²C-HID, `ideapad_laptop` |
-| Battery / charging | ✅ tweak | Charges at **~44 W into a 70 Wh cell** (PD-bound, not adjustable in software). `charge_types` can cap it at ~60% — see [battery care](#battery-care-stop-charging-at-60--panel-indicator) |
+| Battery / charging | ✅ tweak | Charges at **~44 W into a 70 Wh cell** (PD-bound, not adjustable in software). `charge_types` can cap it at ~80% — see [battery care](#battery-care-stop-charging-at-80--panel-indicator) |
 | Fingerprint | ❌ | **No fingerprint hardware exists on this unit** (audited) — don't hunt for a driver |
 | Suspend, USB4/TB, NVMe | ✅ | stock |
 
@@ -134,7 +134,7 @@ sudo ./scripts/setup-tty-font.sh 32x59      # bigger
 > **`update-initramfs -u`** the font only kicks in late, so boot messages stay
 > tiny. The script runs both `setupcon` and `update-initramfs -u` for you.
 
-### Battery care: stop charging at ~60% (+ panel indicator)
+### Battery care: stop charging at ~80% (+ panel indicator)
 
 Out of the box this machine charges with Lenovo **Rapid Charge** on, pushing
 **~44 W into a 70 Wh cell** — about **0.63C**. `ideapad_laptop` exposes Lenovo's
@@ -148,7 +148,7 @@ entire battery-care feature set as **one** sysfs knob:
 |---|---|---|---|
 | `Fast` | 100% | 44.4 W | You need a full battery *now*. Stock default. |
 | `Standard` | 100% | 44.2 W | Rapid Charge off — but see below: no measurable difference on this unit. |
-| `Long_Life` | **~55–60%** | 43.9 W, until the cap | The laptop mostly lives on AC. **The one that actually helps.** |
+| `Long_Life` | **~80%** (measured: stops at 79–80%) | 43.9 W, until the cap | The laptop mostly lives on AC. **The one that actually helps.** |
 
 > ⚠️ **Measured, not assumed — this knob does *not* throttle the charge rate.**
 > All three modes charge at the same ~44 W. The rate is set by the **USB-PD
@@ -255,7 +255,7 @@ scripts/
   setup-screenshots.sh    Region-screenshot key bindings + clipboard manager
   setup-tty-font.sh       Large console font for the 2.8K panel (+ initramfs, readable early boot)
   setup-battery-care.sh   Installs charge-mode control: CLI + udev rule + panel indicator
-  battery-care.sh         Read/set the EC charge mode (Fast / Standard / Long_Life, ~60% cap)
+  battery-care.sh         Read/set the EC charge mode (Fast / Standard / Long_Life, ~80% cap)
   battery-care-indicator.py  Notification-area indicator: current mode, live charge rate, switcher
   hardware-fingerprint.sh Generate ~/aboutme.md — your machine's own hardware/driver reference
   upload-hw-probe.sh      Opt-in: share an anonymized probe to linux-hardware.org (helps discoverability)

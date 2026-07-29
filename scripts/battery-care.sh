@@ -10,8 +10,9 @@
 #
 #   Fast        Rapid Charge ON. Charges to 100%. Stock default.
 #   Standard    Rapid Charge OFF. Charges to 100%.
-#   Long_Life   Conservation mode. Stops around 55-60% and holds there. Best
-#               for a machine that mostly lives on AC.
+#   Long_Life   Conservation mode. Stops around 80% and holds there (measured
+#               on this unit: charging ends at 79-80%). Best for a machine that
+#               mostly lives on AC.
 #
 # MEASURED on this unit (25-28% SoC): Fast 44.4 W, Standard 44.2 W, Long_Life
 # 43.9 W. This knob does NOT throttle the charge rate — the rate is bounded by
@@ -29,7 +30,7 @@
 #   battery-care.sh                  # show current mode, charge rate, health
 #   battery-care.sh fast             # 100%, rapid  (~44 W)
 #   battery-care.sh standard         # 100%, normal rate
-#   battery-care.sh conservation     # ~60% cap     (alias: long-life)
+#   battery-care.sh conservation     # ~80% cap     (alias: long-life)
 #   battery-care.sh watch            # live charge rate, 1 Hz, until Ctrl-C
 #
 # Writing needs root, OR the group-write permission that setup-battery-care.sh
@@ -85,7 +86,7 @@ describe() {
     case "$1" in
         Fast)      echo "Rapid Charge — to 100% (stock)" ;;
         Standard)  echo "Rapid Charge off — to 100%" ;;
-        Long_Life) echo "Conservation — stops around 55-60%" ;;
+        Long_Life) echo "Conservation — stops around 80%" ;;
         *)         echo "unknown" ;;
     esac
 }
@@ -169,9 +170,9 @@ set_mode() {
     fi
 
     echo ">> Mode: $now — $(describe "$now")"
-    if [[ "$now" == Long_Life && "$(cat "$BAT/capacity")" -lt 55 ]]; then
+    if [[ "$now" == Long_Life && "$(cat "$BAT/capacity")" -lt 79 ]]; then
         echo "   Below the cap, so it keeps charging (at the usual ~44 W — this"
-        echo "   mode sets a stop point, not a rate) until it reaches ~60%."
+        echo "   mode sets a stop point, not a rate) until it reaches ~80%."
     fi
 }
 
